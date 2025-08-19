@@ -1,15 +1,261 @@
-// Skala für Höhe – max 10% mehr als höchster Wert
-const y = d3.scaleLinear()
-    .domain([0, d3.max(data, d => d.value) * 1.1])  
-    .range([h - margin.bottom, margin.top]);
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Wahl-Tool Gesamt</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0a1628;
+      color: white;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 1200px;
+      margin: auto;
+      padding: 20px;
+    }
+    h2 {
+      margin-top: 40px;
+      font-size: 22px;
+    }
+    svg {
+      width: 100%;
+      height: 500px;
+    }
+    .bar { cursor: pointer; }
+    .label {
+      font-size: 14px;
+      font-weight: bold;
+      fill: white;
+    }
+    .button-row {
+      margin-top: 10px;
+      text-align: center;
+    }
+    button {
+      background: #1f3d7a;
+      color: white;
+      border: none;
+      padding: 8px 14px;
+      margin: 4px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover { background: #2851a3; }
+    .koalition-select {
+      margin: 10px 0;
+      padding: 6px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
 
-// Prozentzahlen über den Balken
-svg.selectAll(".label")
-  .data(data)
+  <h1>Wahl-Tool (Bundestag)</h1>
+
+  <!-- Sitzverteilung -->
+  <h2>Sitzverteilung (Halbkreis)</h2>
+  <svg id="sitzverteilung"></svg>
+
+  <!-- Koalitionen -->
+  <h2>Koalitionsrechner</h2>
+  <select id="koalitionSelect" class="koalition-select" onchange="setKoalition(this.value)">
+    <option value="">Bitte auswählen…</option>
+    <option value="schwarzrot">Schwarz-Rot</option>
+    <option value="schwarzgruen">Schwarz-Grün</option>
+    <option value="schwarzgelb">Schwarz-Gelb</option>
+    <option value="jamaika">Jamaika</option>
+    <option value="deutschland">Deutschland</option>
+    <option value="ampel">Ampel</option>
+    <option value="kenia">Kenia</option>
+    <option value="brombeer">Brombeer</option>
+    <option value="rotrotgruen">Rot-Rot-Grün</option>
+    <option value="rotgruenrot">Rot-Grün-Rot</option>
+    <option value="gruenrotrot">Grün-Rot-Rot</option>
+    <option value="spd-bsw">SPD-BSW</option>
+    <option value="rotgruen">Rot-Grün</option>
+    <option value="sozialliberal">Sozialliberale Koalition</option>
+    <option value="gruenliberal">Grün-Liberale Koalition</option>
+    <option value="rotrot">Rot-Rot</option>
+  </select>
+  <svg id="koalitionChart"></svg>
+
+  <!-- Prognose -->
+  <h2>Prognose – ARD-Stil</h2>
+  <div class="chart-container">
+    <svg id="prognose"></svg>
+    <div class="button-row">
+      <button onclick="animateAll()">Alle animieren</button>
+      <button onclick="resetChart()">Reset</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* =====================
+   Beispiel-Daten
+===================== */
+const parteien = [
+  {name: "CDU/CSU", value: 28, sitze: 200, color: "black"},
+  {name: "SPD", value: 17, sitze: 120, color: "red"},
+  {name: "Grüne", value: 12, sitze: 80, color: "green"},
+  {name: "FDP", value: 6, sitze: 45, color: "yellow"},
+  {name: "AfD", value: 20, sitze: 140, color: "deepskyblue"},
+  {name: "Linke", value: 6, sitze: 40, color: "magenta"},
+  {name: "BSW", value: 7, sitze: 50, color: "orange"},
+];
+
+/* =====================
+   Sitzverteilung Halbkreis
+===================== */
+const sitzSVG = d3.select("#sitzverteilung");
+const w = 900, h = 300;
+sitzSVG.attr("viewBox", `0 0 ${w} ${h}`);
+const radius = 140;
+
+const pie = d3.pie()
+  .value(d => d.sitze)
+  .sort(null)
+  .startAngle(-Math.PI)
+  .endAngle(0);
+
+const arc = d3.arc()
+  .innerRadius(radius - 40)
+  .outerRadius(radius);
+
+sitzSVG.append("g")
+  .attr("transform", `translate(${w/2},${h})`)
+  .selectAll("path")
+  .data(pie(parteien))
+  .join("path")
+  .attr("d", arc)
+  .attr("fill", d => d.data.color);
+
+sitzSVG.append("text")
+  .attr("x", w/2)
+  .attr("y", 20)
+  .attr("text-anchor", "middle")
+  .attr("fill", "white")
+  .text("Sitzverteilung");
+
+/* =====================
+   Koalitionsrechner
+===================== */
+const koalSVG = d3.select("#koalitionChart");
+koalSVG.attr("viewBox", `0 0 ${w} ${h}`);
+
+function drawKoalition(selected) {
+  koalSVG.selectAll("*").remove();
+
+  const koalitionen = {
+    "schwarzrot": ["CDU/CSU","SPD"],
+    "schwarzgruen": ["CDU/CSU","Grüne"],
+    "schwarzgelb": ["CDU/CSU","FDP"],
+    "jamaika": ["CDU/CSU","Grüne","FDP"],
+    "deutschland": ["CDU/CSU","SPD","FDP"],
+    "ampel": ["SPD","Grüne","FDP"],
+    "kenia": ["CDU/CSU","SPD","Grüne"],
+    "brombeer": ["SPD","Linke","BSW"],
+    "rotrotgruen": ["SPD","Linke","Grüne"],
+    "rotgruenrot": ["SPD","Grüne","Linke"],
+    "gruenrotrot": ["Grüne","SPD","Linke"],
+    "spd-bsw": ["SPD","BSW"],
+    "rotgruen": ["SPD","Grüne"],
+    "sozialliberal": ["SPD","FDP"],
+    "gruenliberal": ["Grüne","FDP"],
+    "rotrot": ["SPD","Linke"]
+  };
+
+  const parteienListe = koalitionen[selected] || [];
+
+  koalSVG.append("g")
+    .attr("transform", `translate(${w/2},${h})`)
+    .selectAll("path")
+    .data(pie(parteien))
+    .join("path")
+    .attr("d", arc)
+    .attr("fill", d => parteienListe.includes(d.data.name) ? d.data.color : "#999");
+}
+
+function setKoalition(val) { drawKoalition(val); }
+
+/* =====================
+   Prognose – ARD-Stil
+===================== */
+const progSVG = d3.select("#prognose");
+progSVG.attr("viewBox", `0 0 ${w} 500`);
+
+const margin = {top: 50, right: 20, bottom: 60, left: 50};
+const x = d3.scaleBand()
+  .domain(parteien.map(d => d.name))
+  .range([margin.left, w - margin.right])
+  .padding(0.3);
+
+const y = d3.scaleLinear()
+  .domain([0, d3.max(parteien, d => d.value) * 1.2])
+  .range([500 - margin.bottom, margin.top]);
+
+progSVG.append("g")
+  .attr("transform", `translate(0,${500 - margin.bottom})`)
+  .call(d3.axisBottom(x))
+  .selectAll("text")
+  .style("fill", "white");
+
+const bars = progSVG.selectAll(".bar")
+  .data(parteien)
+  .join("rect")
+  .attr("class", "bar")
+  .attr("x", d => x(d.name))
+  .attr("y", y(0))
+  .attr("width", x.bandwidth())
+  .attr("height", 0)
+  .attr("fill", d => d.color)
+  .on("click", animateBar);
+
+const labels = progSVG.selectAll(".label")
+  .data(parteien)
   .join("text")
   .attr("class", "label")
   .attr("x", d => x(d.name) + x.bandwidth()/2)
-  .attr("y", d => y(d.value) - 5)   // 5px über Balken
+  .attr("y", y(0) - 5)
   .attr("text-anchor", "middle")
   .text(d => d.value.toFixed(1) + "%")
   .style("opacity", 0);
+
+function animateBar(event, d) {
+  const bar = d3.select(this);
+  const label = labels.filter(l => l.name === d.name);
+
+  bar.transition().duration(1000)
+    .attr("y", y(d.value))
+    .attr("height", y(0) - y(d.value));
+
+  label.transition().duration(1000)
+    .attr("y", y(d.value) - 5)
+    .style("opacity", 1);
+}
+
+function animateAll() {
+  bars.each(function(event, d) {
+    animateBar.call(this, null, d);
+  });
+}
+
+function resetChart() {
+  bars.transition().duration(500)
+    .attr("y", y(0))
+    .attr("height", 0);
+
+  labels.transition().duration(500)
+    .attr("y", y(0) - 5)
+    .style("opacity", 0);
+}
+</script>
+
+</body>
+</html>
